@@ -49,22 +49,20 @@ class TongueDataset(Dataset):
         print(f"✔ 載入資料: {csv_file} 共 {len(self.data)} 筆")
         print(f"✔ 自動旋轉：{'啟用' if self.rotate_upright_enabled else '停用'}")
 
+        # 這邊拆開 augmentation 和 normalize 的transform方便控制
         if is_train:
-            self.transform = A.Compose([
-                A.Resize(384, 384),
+            self.augment = A.Compose([
                 A.HorizontalFlip(p=0.3),
                 A.RandomBrightnessContrast(0.1, 0.1, p=0.3),
-                A.Normalize(mean=[0.485, 0.456, 0.406],
-                            std=[0.229, 0.224, 0.225]),
-                ToTensorV2()
             ])
         else:
-            self.transform = A.Compose([
-                A.Resize(384, 384),
-                A.Normalize(mean=[0.485, 0.456, 0.406],
-                            std=[0.229, 0.224, 0.225]),
-                ToTensorV2()
-            ])
+            self.augment = None
+
+        self.normalize_transform = A.Compose([
+            A.Normalize(mean=[0.485, 0.456, 0.406],
+                        std=[0.229, 0.224, 0.225]),
+            ToTensorV2()
+        ])
 
     def __len__(self):
         return len(self.data)
@@ -77,35 +75,65 @@ class TongueDataset(Dataset):
         img_pil = Image.open(img_path).convert("RGB")
         img_np = np.array(img_pil)
 
-        # ⬆️ 旋轉成舌尖朝上
+        # 旋轉成舌尖朝上
         if self.rotate_upright_enabled:
             img_np = rotate_upright(img_np)
 
-        # 分區
-        img_whole = img_np.copy()
-        img_body = self.crop_center_region(img_np, region="body")
-        img_edge = self.crop_center_region(img_np, region="edge")
+        # mask-based 分區（裁切、resize、body、edge）
+        img_whole, body_img, edge_img = self.mask_based_partition(img_np)
 
-        # transform
-        img_whole = self.transform(image=img_whole)['image']
-        img_body = self.transform(image=img_body)['image']
-        img_edge = self.transform(image=img_edge)['image']
+        # 訓練時做augmentation (albumentations要求uint8 numpy array)
+        if self.is_train and self.augment is not None:
+            augmented = self.augment(image=img_whole)
+            img_whole = augmented['image']
+
+            augmented = self.augment(image=body_img)
+            body_img = augmented['image']
+
+            augmented = self.augment(image=edge_img)
+            edge_img = augmented['image']
+
+        # normalize + 轉tensor
+        img_whole = self.normalize_transform(image=img_whole)['image']
+        body_img = self.normalize_transform(image=body_img)['image']
+        edge_img = self.normalize_transform(image=edge_img)['image']
 
         labels = torch.tensor(row[self.label_cols].values.astype(float), dtype=torch.float32)
-        return (img_whole, img_body, img_edge), labels
+        return (img_whole, body_img, edge_img), labels
 
-    def crop_center_region(self, img_np, region="body"):
-        h, w = img_np.shape[:2]
-        if region == "body":
-            x1, y1 = int(w*0.15), int(h*0.15)
-            x2, y2 = int(w*0.85), int(h*0.85)
-            return img_np[y1:y2, x1:x2]
-        elif region == "edge":
-            mask = np.ones((h, w), dtype=np.uint8) * 255
-            inner = np.zeros((h, w), dtype=np.uint8)
-            x1, y1 = int(w*0.2), int(h*0.2)
-            x2, y2 = int(w*0.8), int(h*0.8)
-            inner[y1:y2, x1:x2] = 255
-            edge_mask = cv2.subtract(mask, inner)
-            return cv2.bitwise_and(img_np, img_np, mask=edge_mask)
-        return img_np
+    def mask_based_partition(self, img_np):
+        """
+        利用舌頭mask做分區：
+        - 裁切並resize成384x384
+        - 腐蝕計算body mask
+        - edge = mask - body mask 且裁掉上方1/4邊緣
+        """
+
+        # 先灰階+threshold找mask
+        gray = cv2.cvtColor(img_np, cv2.COLOR_RGB2GRAY)
+        _, mask = cv2.threshold(gray, 10, 255, cv2.THRESH_BINARY)
+
+        # bounding rect 裁切
+        x, y, w, h = cv2.boundingRect(mask)
+        cropped = img_np[y:y+h, x:x+w]
+        resized = cv2.resize(cropped, (384, 384), interpolation=cv2.INTER_LINEAR)
+
+        mask_cropped = mask[y:y+h, x:x+w]
+        mask_resized = cv2.resize(mask_cropped, (384, 384), interpolation=cv2.INTER_NEAREST)
+
+        # 計算 edge width，這個比例可微調
+        diag = int(np.sqrt(384**2 + 384**2))
+        edge_width = int(diag * 0.191)
+
+        kernel = np.ones((edge_width, edge_width), np.uint8)
+        mask_eroded = cv2.erode(mask_resized, kernel, iterations=1)
+
+        mask_edge = cv2.subtract(mask_resized, mask_eroded)
+        mask_edge[:384 // 4, :] = 0  # 裁掉上方1/4的edge
+
+        mask_body = cv2.subtract(mask_resized, mask_edge)
+
+        body_img = cv2.bitwise_and(resized, resized, mask=mask_body)
+        edge_img = cv2.bitwise_and(resized, resized, mask=mask_edge)
+
+        return resized, body_img, edge_img
