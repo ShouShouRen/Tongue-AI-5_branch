@@ -116,20 +116,20 @@ class TongueDataset(Dataset):
         # bounding rect 裁切
         x, y, w, h = cv2.boundingRect(mask)
         cropped = img_np[y:y+h, x:x+w]
-        resized = cv2.resize(cropped, (384, 384), interpolation=cv2.INTER_LINEAR)
+        resized = cv2.resize(cropped, (224, 224), interpolation=cv2.INTER_LINEAR)
 
         mask_cropped = mask[y:y+h, x:x+w]
-        mask_resized = cv2.resize(mask_cropped, (384, 384), interpolation=cv2.INTER_NEAREST)
+        mask_resized = cv2.resize(mask_cropped, (224, 224), interpolation=cv2.INTER_NEAREST)
 
         # 計算 edge width，這個比例可微調
-        diag = int(np.sqrt(384**2 + 384**2))
+        diag = int(np.sqrt(224**2 + 224**2))
         edge_width = int(diag * 0.191)
 
         kernel = np.ones((edge_width, edge_width), np.uint8)
         mask_eroded = cv2.erode(mask_resized, kernel, iterations=1)
 
         mask_edge = cv2.subtract(mask_resized, mask_eroded)
-        mask_edge[:384 // 4, :] = 0  # 裁掉上方1/4的edge
+        mask_edge[:224 // 4, :] = 0  # 裁掉上方1/4的edge
 
         mask_body = cv2.subtract(mask_resized, mask_edge)
 

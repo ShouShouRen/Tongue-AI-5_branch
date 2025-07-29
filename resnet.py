@@ -394,7 +394,7 @@ if __name__ == "__main__":
         print(f"\n====== Testing {backbone} ======")
         
         for i in range(1, 6):
-            train_csv = f"train_fold{i}.csv"
+            train_csv = f"aug_train_fold{i}.csv"
             val_csv = f"val_fold{i}.csv"
             model_path = f"signnet_{backbone}_fold{i}.pth"
             
@@ -403,8 +403,8 @@ if __name__ == "__main__":
             try:
                 # 根據backbone調整batch size
                 if backbone == 'resnet50':
-                    batch_size = 32
-                    lr = 1e-4
+                    batch_size = 12
+                    lr = 5e-5
                 elif backbone == 'resnet34':
                     batch_size = 24
                     lr = 1e-4
@@ -413,7 +413,7 @@ if __name__ == "__main__":
                     lr = 2e-4
                 
                 best_f1 = train_model(
-                    train_csv, val_csv, "images", label_cols,
+                    train_csv, val_csv, "augmented_images", label_cols,
                     backbone=backbone,
                     feature_dim=512,
                     num_epochs=30, 
