@@ -249,7 +249,7 @@ def run_stage(train_loader, val_loader, model, criterion, optimizer, scheduler, 
 # --------------- Stages ---------------
 def stage1(train_csv, val_csv, image_root, label_cols,
            num_epochs=30, batch_size=12, lr=5e-5, model_path='signnet_stage1.pth',
-           beta_cb=0.9999, sampler_power=1.0, backbone='resnet50', feature_dim=512):
+           beta_cb=0.9999, sampler_power=1.0, backbone='swin_base_patch4_window7_224', feature_dim=512):
 
     clear_gpu_memory()
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -274,7 +274,7 @@ def stage1(train_csv, val_csv, image_root, label_cols,
 def stage2(train_csv, val_csv, image_root, label_cols,
            num_epochs=15, batch_size=12, lr=3e-4, model_path_stage1='signnet_stage1.pth',
            model_path_out='signnet_stage2.pth', beta_cb=0.9999, sampler_power=1.25,
-           backbone='resnet50', feature_dim=512, reinit_last=True, unfreeze_feature_proj=False):
+           backbone='swin_base_patch4_window7_224', feature_dim=512, reinit_last=True, unfreeze_feature_proj=False):
 
     clear_gpu_memory()
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -316,7 +316,7 @@ def stage2(train_csv, val_csv, image_root, label_cols,
 if __name__ == '__main__':
     label_cols = ['TonguePale', 'TipSideRed', 'Spot', 'Ecchymosis',
                   'Crack', 'Toothmark', 'FurThick', 'FurYellow']
-    backbone = 'resnet50'
+    backbone = 'swin_base_patch4_window7_224'
     feature_dim = 512
 
     for i in range(1, 5 + 1):
