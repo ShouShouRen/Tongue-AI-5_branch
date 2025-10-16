@@ -14,10 +14,7 @@ def build_multilabel_weighted_sampler(train_csv, label_cols, power=1.0, beta=0.9
     """
     讀取 training CSV，依多標籤稀有度給每張圖 sample weight。
     sample_weight(i) = sum_c [ w_c * y_ic ]，若全 0，給最小權重。
-      - w_c 用 effective number（CB）計算
-      - power 可微調取樣強度（0.5 ~ 1.5）
-    回傳：
-      sampler, n_pos_t, n_neg_t（供 loss 使用）
+    回傳：sampler, n_pos_t, n_neg_t（供 loss 使用）
     """
     df = pd.read_csv(train_csv)
     Y = df[label_cols].values.astype(np.float32)  # [N, C]
@@ -26,13 +23,11 @@ def build_multilabel_weighted_sampler(train_csv, label_cols, power=1.0, beta=0.9
     n_pos = Y.sum(axis=0)                      # [C]
     n_neg = N - n_pos
     w_c = _effective_num(n_pos, beta=beta)     # [C] 小眾類較大
-    # 樣本權重：以其正標籤對應的類別權重總和代表「稀有度」
+
     sample_w = np.matmul(Y, w_c.reshape(-1, 1)).squeeze(1)  # [N]
-    # 若某些行全 0（理論上不會），給極小值避免 0
     min_nonzero = np.minimum(sample_w[sample_w > 0].min() if (sample_w > 0).any() else 1.0, 1.0)
     sample_w = np.where(sample_w > 0, sample_w, min_nonzero * 0.1)
 
-    # 適度控制強度
     sample_w = np.power(sample_w, power)
     sample_w = sample_w / sample_w.mean()
 
