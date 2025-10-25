@@ -1,4 +1,5 @@
 # calculate_flops.py - 計算 PyTorch 模型的 FLOPS 和參數數量
+# (已更新，包含 TFLOPs/s 和 FPS 效能測試)
 
 import torch
 import argparse
@@ -56,7 +57,7 @@ def calculate_flops(args):
         inputs = (dummy_input_whole, dummy_input_root, dummy_input_center, dummy_input_side, dummy_input_tip)
 
     print(f"使用輸入尺寸: {img_size}x{img_size}")
-    print("開始計算 FLOPS...")
+    print("開始計算 FLOPS (理論計算量)...")
 
     # 使用 fvcore 計算 FLOPS
     try:
@@ -71,17 +72,76 @@ def calculate_flops(args):
         tflops = total_flops / 1e12
         mparams = total_params / 1e6
 
+        print("理論計算量計算完成!")
+
+        # --- 開始計算實際推論速度 (TFLOPs/s) ---
+        print("\n開始計算實際推論速度 (TFLOPs/s)...")
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        
+        avg_time_sec = 0.0
+        fps = 0.0
+        effective_tflops_per_sec = 0.0
+
+        if device.type == 'cpu':
+            print("警告: 偵測到 CPU。TFLOPs/s 的計算在 GPU 上執行才有意義。")
+            print("跳過實際效能測試。")
+        else:
+            print(f"使用裝置: {torch.cuda.get_device_name(device)}")
+            model.to(device)
+            # 將輸入張量也移動到 GPU
+            inputs = tuple(inp.to(device) for inp in inputs)
+
+            # 預熱 (Warm-up) - 讓 GPU 進入高效能狀態
+            print("預熱中 (Warm-up)...")
+            for _ in range(30):
+                _ = model(*inputs)
+            
+            torch.cuda.synchronize() # 確保預熱完成
+
+            # 準確計時
+            num_runs = 100
+            start_event = torch.cuda.Event(enable_timing=True)
+            end_event = torch.cuda.Event(enable_timing=True)
+
+            print(f"執行 {num_runs} 次推論以取得平均時間...")
+            
+            start_event.record()
+            for _ in range(num_runs):
+                _ = model(*inputs)
+            end_event.record()
+
+            # 等待所有 CUDA 核心完成
+            torch.cuda.synchronize()
+
+            # 計算時間
+            elapsed_time_ms = start_event.elapsed_time(end_event)
+            avg_time_sec = (elapsed_time_ms / 1000) / num_runs # 每次推論的平均秒數
+            fps = 1.0 / avg_time_sec # 每秒推論次數 (FPS)
+            
+            # TFLOPs/s = (每次推論的 FLOPs / 每次推論的秒數) / 1e12
+            effective_tflops_per_sec = (total_flops / avg_time_sec) / 1e12
+            print("效能測試完成!")
+
         print("-" * 30)
-        print("計算完成!")
-        print(f"模型架構      : {args.model}")
-        print(f"骨幹網路      : {args.backbone}")
-        print(f"輸入尺寸      : {img_size}x{img_size}")
+        print("計算總結")
+        print(f"模型架構      : {args.model}")
+        print(f"骨幹網路      : {args.backbone}")
+        print(f"輸入尺寸      : {img_size}x{img_size}")
         print("-" * 30)
+        print("模型複雜度 (理論):")
         print(f"總參數 (Params) : {mparams:.2f} M")
-        print(f"總計算量 (FLOPs): {gflops:.2f} GFLOPS")
-        print(f"總計算量 (FLOPs): {tflops:.4f} TFLOPS")
-        print(f"FLOPs  : {total_flops} FLOPs")
+        print(f"總計算量 (FLOPs): {gflops:.2f} GFLOPS (理論單次)")
+        print(f"總計算量 (FLOPs): {tflops:.4f} TFLOPS (理論單次)")
         print("-" * 30)
+        print("實際硬體效能 (Batch Size=1):")
+        if device.type == 'cuda':
+            print(f"平均推論時間 : {avg_time_sec * 1000:.2f} ms")
+            print(f"每秒推論次數(FPS): {fps:.2f} FPS")
+            print(f"實際計算效能 : {effective_tflops_per_sec:.2f} TFLOPs/s")
+        else:
+            print(" (僅在 CUDA 裝置上計算)")
+        print("-" * 30)
+
         # print("\n詳細分析:")
         # print(flops.by_module()) # 印出每個模組的詳細計算量 (可選)
 
@@ -105,20 +165,3 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     calculate_flops(args)
-
-### 如何使用
-
-#1.  **儲存檔案**：將上面的程式碼儲存為 `calculate_flops.py`。
-#2.  **執行計算**：
-#    * **分析 `Simple` + `ConvNeXt` (預設 224x224)**：
-#      ```bash
-#     python calculate_flops.py --model Simple --backbone convnext_base
-#      ```
-#    * **分析 `SignOrientedAttention` + `ResNet50` (指定 384x384)**：
-#      ```bash
-#      python calculate_flops.py --model SignOrientedAttention --backbone resnet50 --img_size 384
-#      ```
-#    * **分析 `Simple` + `Vim` (建議 224x224)**：
-#      ```bash
-#      python calculate_flops.py --model Simple --backbone vim_tiny_patch16_224 --img_size 224
-      
